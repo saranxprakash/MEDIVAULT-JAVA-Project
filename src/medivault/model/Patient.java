@@ -8,7 +8,7 @@ public class Patient implements Serializable {
     //declare patient variable that are required and keep all private
 
     private String PatientID,name,gender,email,phone,symptoms,prescribedMedicine;
-    private String prescribe_medicine,password;
+    private String password;
     private int age,treatment_duration;
     private double billamt;
     private boolean billpaid;
