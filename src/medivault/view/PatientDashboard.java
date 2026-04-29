@@ -51,7 +51,9 @@ public class PatientDashboard extends JFrame {
         contentPanel.setBackground(BG_PAGE);
         contentPanel.add(buildOverviewPanel(),     "OVERVIEW");
         contentPanel.add(buildMedicalPanel(),      "MEDICAL");
-        contentPanel.add(buildAppointmentsPanel(), "APPOINTMENTS");
+        JPanel apptPanel = buildAppointmentsPanel();
+        apptPanel.setName("APPOINTMENTS");
+        contentPanel.add(apptPanel, "APPOINTMENTS");
         contentPanel.add(buildBookPanel(),         "BOOK");
         contentPanel.add(buildBillingPanel(),      "BILLING");
 
@@ -140,7 +142,12 @@ public class PatientDashboard extends JFrame {
         for (String[] item : nav) {
             JButton btn = buildSidebarBtn(item[0]);
             String card = item[1];
-            btn.addActionListener(e -> showCard(card));
+            btn.addActionListener(e -> {
+                if (card.equals("APPOINTMENTS")) {
+                    refreshAppointmentsPanel();
+                }
+                showCard(card);
+            });
             side.add(btn);
             side.add(Box.createVerticalStrut(6));
         }
@@ -157,7 +164,26 @@ public class PatientDashboard extends JFrame {
         side.add(logout);
         return side;
     }
-
+//--Refresh the bookings----------
+    private void refreshAppointmentsPanel() {
+        // Remove the old panel and rebuild it fresh
+        int count = contentPanel.getComponentCount();
+        for (int i = 0; i < count; i++) {
+            Component c = contentPanel.getComponent(i);
+            if (c instanceof JPanel) {
+                // identify by name tag we'll set below
+                if ("APPOINTMENTS".equals(c.getName())) {
+                    contentPanel.remove(c);
+                    break;
+                }
+            }
+        }
+        JPanel fresh = buildAppointmentsPanel();
+        fresh.setName("APPOINTMENTS");
+        contentPanel.add(fresh, "APPOINTMENTS");
+        contentPanel.revalidate();
+        contentPanel.repaint();
+    }
     private JButton buildSidebarBtn(String text) {
         JButton btn = new JButton(text) {
             @Override
@@ -434,6 +460,7 @@ public class PatientDashboard extends JFrame {
                 errLabel.setText("Booked successfully!");
                 dateField.setText("Date  (YYYY-MM-DD)");
                 dateField.setForeground(TEXT_MUTED);
+                refreshAppointmentsPanel(); // keep table in sync
             }
         });
 

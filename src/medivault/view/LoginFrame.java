@@ -229,9 +229,6 @@ public class LoginFrame extends JFrame {
     }
 
     // ── Register panel ───────────────────────────────────────────────────
-    // KEY FIX: Use GridBagLayout for the whole right panel so everything
-    // is centred and fields fill proper width
-
     private JPanel buildRegisterPanel() {
         // Outer white panel
         JPanel outer = new JPanel(new GridBagLayout());
@@ -363,15 +360,6 @@ public class LoginFrame extends JFrame {
         JButton signInBtn = makeTealButton("SIGN IN");
         signInBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-        JLabel hint = new JLabel("Patient: rahul@email.com / patient123");
-        hint.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        hint.setForeground(TEXT_MUTED);
-        hint.setAlignmentX(Component.CENTER_ALIGNMENT);
-
-        JLabel hint2 = new JLabel("Doctor: anita@medivault.com / doctor123");
-        hint2.setFont(new Font("Segoe UI", Font.PLAIN, 11));
-        hint2.setForeground(TEXT_MUTED);
-        hint2.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         form.add(title);
         form.add(Box.createVerticalStrut(18));
@@ -385,9 +373,7 @@ public class LoginFrame extends JFrame {
         form.add(Box.createVerticalStrut(14));
         form.add(signInBtn);
         form.add(Box.createVerticalStrut(20));
-        form.add(hint);
         form.add(Box.createVerticalStrut(4));
-        form.add(hint2);
 
         signInBtn.addActionListener(e -> {
             String email = getRealText(emailField, "Email");
@@ -418,9 +404,6 @@ public class LoginFrame extends JFrame {
     }
 
     // ── Component builders ────────────────────────────────────────────────
-
-    // The KEY fix — all fields use the same fixed width via setPreferredSize
-    // and LEFT_ALIGNMENT so BoxLayout lines them up perfectly
     private JTextField makePlaceholderField(String placeholder) {
         JTextField f = new JTextField() {
             @Override
