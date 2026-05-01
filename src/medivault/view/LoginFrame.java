@@ -26,6 +26,10 @@ public class LoginFrame extends JFrame {
     private static final Color RED_ACCENT  = new Color(0xE8, 0x5D, 0x75);
     private static final Color ERR_COLOR   = new Color(0xE5, 0x39, 0x35);
 
+    // Admin shield colour — a deep navy that contrasts but stays in palette
+    private static final Color ADMIN_COLOR      = new Color(0x1A, 0x3A, 0x5C);
+    private static final Color ADMIN_COLOR_DARK = new Color(0x0D, 0x25, 0x40);
+
     private String currentMode = "register";
     private JPanel rightContainer;
     private JLabel leftTitle;
@@ -148,14 +152,68 @@ public class LoginFrame extends JFrame {
         leftActionBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
         leftActionBtn.addActionListener(e -> switchMode());
 
+        // ── Admin Portal button (outline style, smaller) ──
+        JButton adminBtn = buildAdminPortalButton();
+        adminBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
+        adminBtn.addActionListener(e -> {
+            AdminLoginFrame adminLogin = new AdminLoginFrame(this);
+            adminLogin.setVisible(true);
+        });
+
         inner.add(leftTitle);
         inner.add(Box.createVerticalStrut(14));
         inner.add(leftSub);
         inner.add(Box.createVerticalStrut(32));
         inner.add(leftActionBtn);
+        inner.add(Box.createVerticalStrut(14));   // gap between the two buttons
+        inner.add(adminBtn);
 
         p.add(inner);
         return p;
+    }
+
+    // Solid outline button — same style as SIGN IN but navy + shield icon
+    private JButton buildAdminPortalButton() {
+        JButton btn = new JButton("🛡  Admin Portal") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+
+                // Filled dark-navy background with slight transparency
+                if (getModel().isRollover()) {
+                    g2.setColor(new Color(255, 255, 255, 45));
+                } else {
+                    g2.setColor(new Color(0, 0, 0, 30));
+                }
+                g2.fillRoundRect(0, 0, getWidth(), getHeight(), 30, 30);
+
+                // Dashed border to distinguish from primary outline btn
+                g2.setColor(new Color(255, 255, 255, 160));
+                g2.setStroke(new BasicStroke(1.4f, BasicStroke.CAP_ROUND,
+                        BasicStroke.JOIN_ROUND, 0, new float[]{6, 4}, 0));
+                g2.drawRoundRect(1, 1, getWidth()-2, getHeight()-2, 30, 30);
+
+                // Text
+                g2.setColor(new Color(255, 255, 255, 220));
+                g2.setFont(getFont());
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString(getText(),
+                        (getWidth() - fm.stringWidth(getText())) / 2,
+                        (getHeight() + fm.getAscent() - fm.getDescent()) / 2);
+                g2.dispose();
+            }
+        };
+        btn.setFont(new Font("Segoe UI", Font.PLAIN, 12));
+        btn.setOpaque(false);
+        btn.setContentAreaFilled(false);
+        btn.setBorderPainted(false);
+        btn.setFocusPainted(false);
+        btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btn.setPreferredSize(new Dimension(190, 38));
+        btn.setMaximumSize(new Dimension(190, 38));
+        return btn;
     }
 
     private JButton buildOutlineButton(String text) {
@@ -229,12 +287,11 @@ public class LoginFrame extends JFrame {
     }
 
     // ── Register panel ───────────────────────────────────────────────────
+
     private JPanel buildRegisterPanel() {
-        // Outer white panel
         JPanel outer = new JPanel(new GridBagLayout());
         outer.setBackground(WHITE);
 
-        // Inner form with fixed width — this is what was missing before
         JPanel form = new JPanel();
         form.setBackground(WHITE);
         form.setLayout(new BoxLayout(form, BoxLayout.Y_AXIS));
@@ -345,7 +402,7 @@ public class LoginFrame extends JFrame {
         toggleRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 44));
         JToggleButton patBtn = makeToggle("Patient", true);
         JToggleButton docBtn = makeToggle("Doctor",  false);
-        ButtonGroup   grp   = new ButtonGroup();
+        ButtonGroup grp = new ButtonGroup();
         grp.add(patBtn); grp.add(docBtn);
         toggleRow.add(patBtn); toggleRow.add(docBtn);
 
@@ -360,7 +417,6 @@ public class LoginFrame extends JFrame {
         JButton signInBtn = makeTealButton("SIGN IN");
         signInBtn.setAlignmentX(Component.CENTER_ALIGNMENT);
 
-
         form.add(title);
         form.add(Box.createVerticalStrut(18));
         form.add(toggleRow);
@@ -372,8 +428,6 @@ public class LoginFrame extends JFrame {
         form.add(errLabel);
         form.add(Box.createVerticalStrut(14));
         form.add(signInBtn);
-        form.add(Box.createVerticalStrut(20));
-        form.add(Box.createVerticalStrut(4));
 
         signInBtn.addActionListener(e -> {
             String email = getRealText(emailField, "Email");
@@ -404,6 +458,7 @@ public class LoginFrame extends JFrame {
     }
 
     // ── Component builders ────────────────────────────────────────────────
+
     private JTextField makePlaceholderField(String placeholder) {
         JTextField f = new JTextField() {
             @Override
@@ -422,7 +477,6 @@ public class LoginFrame extends JFrame {
         f.setBackground(FIELD_BG);
         f.setOpaque(false);
         f.setBorder(new EmptyBorder(11, 16, 11, 16));
-        // Fixed size — same as form width so it never shifts
         f.setPreferredSize(new Dimension(340, 46));
         f.setMaximumSize(new Dimension(340, 46));
         f.setMinimumSize(new Dimension(340, 46));
@@ -558,7 +612,6 @@ public class LoginFrame extends JFrame {
         btn.setFocusPainted(false);
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
         btn.setPreferredSize(new Dimension(110, 36));
-        // Repaint both when selection changes
         btn.addItemListener(e -> {
             btn.repaint();
             btn.getParent().repaint();
@@ -573,10 +626,8 @@ public class LoginFrame extends JFrame {
         f.setForeground(TEXT_MUTED);
     }
 
-    // Returns empty string if field still shows placeholder
     private String getRealText(JTextField f, String placeholder) {
         String t = f.getText().trim();
         return t.equals(placeholder) ? "" : t;
     }
-
-} // end of LoginFrame
+}
