@@ -282,8 +282,9 @@ public class DatabaseManager {
     /** Count of appointments by status. */
     public Map<String, Integer> getAppointmentStatusCounts() {
         Map<String, Integer> counts = new HashMap<>();
-        counts.put("Scheduled", 0);
-        counts.put("Completed", 0);
+        counts.put("Pending",   0);
+        counts.put("Confirm",   0);
+        counts.put("Complete",  0);
         counts.put("Cancelled", 0);
         for (Appointment a : appointments.values()) {
             String key = a.getStatus().toString();

@@ -1,5 +1,6 @@
 package medivault;
 
+import medivault.model.Admin;
 import medivault.util.UITheme;
 import medivault.view.LoginFrame;
 
@@ -11,6 +12,8 @@ public class Main {
     public static void main(String[] args) {
 
         UITheme.applyGlobalDefaults();
+        
+        Admin.loadPersistedPassword(); 
 
         try {
             UIManager.setLookAndFeel(
