@@ -2,14 +2,18 @@ package medivault.view;
 
 import medivault.controller.AdminController;
 import medivault.model.Appointment;
+import medivault.model.AuditLog;
+import medivault.model.AuditLog.Category;
 import medivault.model.Doctor;
 import medivault.model.Patient;
+import medivault.util.SessionManager;
 
 import javax.swing.*;
 import javax.swing.border.*;
 import javax.swing.table.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.awt.geom.*;
 import java.util.List;
 import java.util.Map;
 
@@ -61,6 +65,16 @@ public class AdminDashboard extends JFrame {
         setBackground(BG);
         initUI();
         refreshAll();
+        // Log the login and start 10-minute inactivity session
+        ctrl.logLogin();
+        SessionManager.start(this, 10, this::sessionExpired);
+    }
+
+    /** Called by SessionManager when 10 minutes of inactivity pass. */
+    private void sessionExpired() {
+        ctrl.logLogout("Session expired — 10 min inactivity");
+        SessionManager.stop();
+        dispose();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -72,8 +86,82 @@ public class AdminDashboard extends JFrame {
         root.setBackground(BG);
         tabs = buildTabs();
         root.add(buildSidebar(tabs), BorderLayout.WEST);
-        root.add(tabs, BorderLayout.CENTER);
+
+        // ── Content area = top bar + tabs ──
+        JPanel contentArea = new JPanel(new BorderLayout());
+        contentArea.setBackground(BG);
+        contentArea.add(buildTopBar(), BorderLayout.NORTH);
+        contentArea.add(tabs, BorderLayout.CENTER);
+
+        root.add(contentArea, BorderLayout.CENTER);
         setContentPane(root);
+    }
+
+    // ── Slim top bar with refresh icon button on the right ────────
+    private JPanel buildTopBar() {
+        JPanel bar = new JPanel(new BorderLayout());
+        bar.setBackground(WHITE);
+        bar.setPreferredSize(new Dimension(0, 48));
+        bar.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 0, 1, 0, new Color(0xE2, 0xE8, 0xF0)),
+                new EmptyBorder(0, 20, 0, 16)));
+
+        // Left: breadcrumb / current section hint
+        JLabel hint = lbl("Admin Dashboard  ·  MediVault",
+                new Font("Segoe UI", Font.PLAIN, 13), TEXT_MUTED);
+        bar.add(hint, BorderLayout.WEST);
+
+        // Right: compact circular refresh button
+        JButton refreshBtn = new JButton("↻") {
+            @Override
+            protected void paintComponent(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g.create();
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                // Circle background
+                if (getModel().isRollover()) {
+                    g2.setColor(new Color(0x3D, 0xB8, 0x9E, 30));
+                } else {
+                    g2.setColor(new Color(0xE8, 0xF5, 0xF2));
+                }
+                g2.fillOval(0, 0, getWidth(), getHeight());
+                // Border ring
+                g2.setColor(TEAL);
+                g2.setStroke(new BasicStroke(1.5f));
+                g2.drawOval(1, 1, getWidth() - 2, getHeight() - 2);
+                // Icon text
+                g2.setColor(TEAL_DARK);
+                g2.setFont(new Font("Segoe UI", Font.BOLD, 17));
+                FontMetrics fm = g2.getFontMetrics();
+                String t = getText();
+                g2.drawString(t,
+                        (getWidth()  - fm.stringWidth(t)) / 2,
+                        (getHeight() + fm.getAscent() - fm.getDescent()) / 2 - 1);
+                g2.dispose();
+            }
+        };
+        refreshBtn.setPreferredSize(new Dimension(36, 36));
+        refreshBtn.setOpaque(false);
+        refreshBtn.setContentAreaFilled(false);
+        refreshBtn.setBorderPainted(false);
+        refreshBtn.setFocusPainted(false);
+        refreshBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        refreshBtn.setToolTipText("Refresh all data");
+        refreshBtn.addActionListener(e -> {
+            refreshAll();
+            // Briefly rotate feel — spin the symbol
+            refreshBtn.setText("↺");
+            Timer t = new Timer(300, ev -> refreshBtn.setText("↻"));
+            t.setRepeats(false); t.start();
+        });
+
+        // Wrap in a vertically-centred panel
+        JPanel right = new JPanel(new GridBagLayout());
+        right.setBackground(WHITE);
+        right.add(refreshBtn);
+        bar.add(right, BorderLayout.EAST);
+
+        return bar;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -102,7 +190,8 @@ public class AdminDashboard extends JFrame {
 
         String[][] nav = {
             {"📊", "Overview"}, {"🧑", "Patients"},
-            {"👨‍⚕", "Doctors"}, {"📅", "Appointments"}, {"💰", "Billing"}
+            {"👨‍⚕", "Doctors"}, {"📅", "Appointments"},
+            {"💰", "Billing"},  {"📋", "Audit Log"}, {"🔒", "Security"}
         };
         for (int i = 0; i < nav.length; i++) {
             final int idx = i;
@@ -120,7 +209,11 @@ public class AdminDashboard extends JFrame {
             int ok = JOptionPane.showConfirmDialog(this,
                     "Logout from Admin Dashboard?", "Confirm Logout",
                     JOptionPane.YES_NO_OPTION);
-            if (ok == JOptionPane.YES_OPTION) dispose();
+            if (ok == JOptionPane.YES_OPTION) {
+                ctrl.logLogout("Manual logout");
+                SessionManager.stop();
+                dispose();
+            }
         });
         sb.add(logout);
         sb.add(Box.createVerticalStrut(20));
@@ -143,6 +236,8 @@ public class AdminDashboard extends JFrame {
         tp.addTab("Doctors",      buildDoctorsTab());
         tp.addTab("Appointments", buildAppointmentsTab());
         tp.addTab("Billing",      buildBillingTab());
+        tp.addTab("Audit Log",    buildAuditLogTab());
+        tp.addTab("Security",     buildSecurityTab());
         return tp;
     }
 
@@ -182,14 +277,10 @@ public class AdminDashboard extends JFrame {
         statusCard.add(statusRow("❌  Cancelled", lblCancelled, DANGER));
         statusCard.add(Box.createVerticalGlue());
 
-        JButton refreshBtn = tealBtn("↻  Refresh");
-        refreshBtn.addActionListener(e -> refreshAll());
-
         JPanel center = new JPanel(new BorderLayout(0, 16));
         center.setBackground(BG);
         center.add(kpiRow,     BorderLayout.NORTH);
         center.add(statusCard, BorderLayout.CENTER);
-        center.add(refreshBtn, BorderLayout.SOUTH);
         p.add(center, BorderLayout.CENTER);
         return p;
     }
@@ -467,11 +558,10 @@ public class AdminDashboard extends JFrame {
 
         JButton statusBtn  = outlineBtn("✏ Change Status", INDIGO);
         JButton deleteBtn  = outlineBtn("🗑 Delete", DANGER);
-        JButton refreshBtn = tealBtn("↻ Refresh");
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         toolbar.setBackground(BG);
-        toolbar.add(statusBtn); toolbar.add(deleteBtn); toolbar.add(refreshBtn);
+        toolbar.add(statusBtn); toolbar.add(deleteBtn);
 
         String[] cols = {"Appt ID","Patient ID","Doctor ID","Date / Time","Status"};
         appointmentModel = tableModel(cols);
@@ -484,8 +574,9 @@ public class AdminDashboard extends JFrame {
                         JTable t, Object v, boolean sel, boolean foc, int r, int c) {
                     super.getTableCellRendererComponent(t, v, sel, foc, r, c);
                     String s = v == null ? "" : v.toString();
-                    setForeground("Completed".equals(s) ? SUCCESS
-                            : "Cancelled".equals(s) ? DANGER : INDIGO);
+                    setForeground("Complete".equals(s) ? SUCCESS
+                            : "Cancelled".equals(s) ? DANGER
+                            : "Confirm".equals(s)   ? TEAL : INDIGO);
                     setBackground(sel ? SEL_BG : (r % 2 == 0 ? WHITE : ROW_ALT));
                     setFont(new Font("Segoe UI", Font.BOLD, 13));
                     return this;
@@ -501,13 +592,11 @@ public class AdminDashboard extends JFrame {
         page.add(top, BorderLayout.NORTH);
         page.add(darkScroll(appointmentTable), BorderLayout.CENTER);
 
-        refreshBtn.addActionListener(e -> populateAppointments(ctrl.getAllAppointments()));
-
         statusBtn.addActionListener(e -> {
             int row = appointmentTable.getSelectedRow();
             if (row < 0) { info("Select an appointment."); return; }
             String id = (String) appointmentModel.getValueAt(row, 0);
-            String[] opts = {"Scheduled","Completed","Cancelled"};
+            String[] opts = {"Pending","Confirm","Complete","Cancelled"};
             String choice = (String) JOptionPane.showInputDialog(this,
                     "New status for " + id + ":", "Update Status",
                     JOptionPane.PLAIN_MESSAGE, null, opts, opts[0]);
@@ -557,12 +646,11 @@ public class AdminDashboard extends JFrame {
         JButton editBtn    = outlineBtn("✏ Edit Bill", INDIGO);
         JButton markPaid   = tealBtn("✅ Mark Paid");
         JButton reportBtn  = outlineBtn("📄 Report", WARNING);
-        JButton refreshBtn = tealBtn("↻ Refresh");
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
         toolbar.setBackground(BG);
         toolbar.add(editBtn); toolbar.add(markPaid);
-        toolbar.add(reportBtn); toolbar.add(refreshBtn);
+        toolbar.add(reportBtn);
 
         String[] cols = {"Patient ID","Name","Bill (₹)","Paid","Symptoms","Medicine"};
         billingModel = tableModel(cols);
@@ -592,8 +680,6 @@ public class AdminDashboard extends JFrame {
         page.add(darkScroll(billingTable), BorderLayout.CENTER);
 
         // Actions
-        refreshBtn.addActionListener(e -> { populateBilling(); refreshBillingSummary(); });
-
         editBtn.addActionListener(e -> {
             int row = billingTable.getSelectedRow();
             if (row < 0) { info("Select a patient."); return; }
@@ -696,17 +782,234 @@ public class AdminDashboard extends JFrame {
         populateBilling();
         refreshOverview();
         refreshBillingSummary();
+        if (auditModel != null) populateAuditTable(ctrl.getAllLogs());
     }
 
     private void refreshOverview() {
         lblPatients.setText(String.valueOf(ctrl.getTotalPatients()));
         lblDoctors.setText(String.valueOf(ctrl.getTotalDoctors()));
         lblAppts.setText(String.valueOf(ctrl.getTotalAppointments()));
-        lblRevenue.setText(String.format("₹ %,.2f", ctrl.getTotalRevenue()));
+        lblRevenue.setText(String.format("Rs. %,.2f", ctrl.getTotalRevenue()));
         Map<String, Integer> sc = ctrl.getAppointmentStatusCounts();
-        lblScheduled.setText(String.valueOf(sc.getOrDefault("Scheduled", 0)));
-        lblCompleted.setText(String.valueOf(sc.getOrDefault("Completed", 0)));
-        lblCancelled.setText(String.valueOf(sc.getOrDefault("Cancelled", 0)));
+        // Appointment.Status enum: Pending, Confirm, Complete, Cancelled
+        int active = sc.getOrDefault("Pending", 0) + sc.getOrDefault("Confirm", 0);
+        lblScheduled.setText(String.valueOf(active));
+        lblCompleted.setText(String.valueOf(sc.getOrDefault("Complete",   0)));
+        lblCancelled.setText(String.valueOf(sc.getOrDefault("Cancelled",  0)));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  TAB 6 — AUDIT LOG
+    // ─────────────────────────────────────────────────────────────
+
+    private JTable auditTable;
+    private DefaultTableModel auditModel;
+
+    private JPanel buildAuditLogTab() {
+        JPanel page = new JPanel(new BorderLayout(0, 14));
+        page.setBackground(BG);
+        page.setBorder(new EmptyBorder(24, 24, 24, 24));
+
+        JTextField searchField = searchField("Search logs…");
+        JButton searchBtn = tealBtn("Search");
+        JComboBox<String> catFilter = new JComboBox<>(
+                new String[]{"All","PATIENT","DOCTOR","APPOINTMENT","BILLING","SECURITY"});
+        catFilter.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        catFilter.setPreferredSize(new Dimension(150, 34));
+        JButton clearBtn = outlineBtn("🗑 Clear All Logs", DANGER);
+
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        toolbar.setBackground(BG);
+        toolbar.add(searchField); toolbar.add(searchBtn);
+        toolbar.add(catFilter);
+        toolbar.add(Box.createHorizontalStrut(20));
+        toolbar.add(clearBtn);
+
+        String[] cols = {"Log ID","Timestamp","Category","Action","Target","Details"};
+        auditModel = tableModel(cols);
+        auditTable = styledTable(auditModel);
+        auditTable.getColumnModel().getColumn(0).setPreferredWidth(60);
+        auditTable.getColumnModel().getColumn(1).setPreferredWidth(150);
+        auditTable.getColumnModel().getColumn(2).setPreferredWidth(100);
+        auditTable.getColumnModel().getColumn(3).setPreferredWidth(120);
+        auditTable.getColumnModel().getColumn(4).setPreferredWidth(210);
+        auditTable.getColumnModel().getColumn(5).setPreferredWidth(260);
+
+        // Category colour renderer
+        auditTable.getColumnModel().getColumn(2).setCellRenderer(
+            new DefaultTableCellRenderer() {
+                @Override public Component getTableCellRendererComponent(
+                        JTable t, Object v, boolean sel, boolean foc, int r, int c) {
+                    super.getTableCellRendererComponent(t, v, sel, foc, r, c);
+                    String s = v == null ? "" : v.toString();
+                    switch (s) {
+                        case "PATIENT":     setForeground(TEAL);    break;
+                        case "DOCTOR":      setForeground(INDIGO);  break;
+                        case "APPOINTMENT": setForeground(WARNING); break;
+                        case "BILLING":     setForeground(SUCCESS); break;
+                        case "SECURITY":    setForeground(DANGER);  break;
+                        default:            setForeground(TEXT_DARK);
+                    }
+                    setBackground(sel ? SEL_BG : (r % 2 == 0 ? WHITE : ROW_ALT));
+                    setFont(new Font("Segoe UI", Font.BOLD, 12));
+                    return this;
+                }
+            });
+
+        JPanel top = new JPanel(new BorderLayout(0, 8));
+        top.setBackground(BG);
+        top.add(pageHeader("Audit Log",
+                "Every admin action recorded — what was done, when and to whom"),
+                BorderLayout.NORTH);
+        top.add(toolbar, BorderLayout.SOUTH);
+
+        page.add(top, BorderLayout.NORTH);
+        page.add(darkScroll(auditTable), BorderLayout.CENTER);
+
+        // Actions
+        Runnable doSearch = () -> {
+            String q   = searchField.getText().trim();
+            String cat = (String) catFilter.getSelectedItem();
+            boolean ph = q.equals("Search logs…") || q.isEmpty();
+            List<AuditLog> results;
+            if (!ph) {
+                results = ctrl.searchLogs(q);
+            } else if (!"All".equals(cat)) {
+                results = ctrl.getLogsByCategory(Category.valueOf(cat));
+            } else {
+                results = ctrl.getAllLogs();
+            }
+            populateAuditTable(results);
+        };
+
+        searchBtn.addActionListener(e -> doSearch.run());
+        catFilter.addActionListener(e -> doSearch.run());
+        searchField.addKeyListener(new KeyAdapter() {
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_ENTER) doSearch.run();
+            }
+        });
+
+        clearBtn.addActionListener(e -> {
+            int ok = JOptionPane.showConfirmDialog(this,
+                    "Permanently delete ALL audit logs?\nThis cannot be undone.",
+                    "Clear Audit Log", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (ok == JOptionPane.YES_OPTION) {
+                ctrl.clearAuditLog();
+                populateAuditTable(ctrl.getAllLogs());
+                info("Audit log cleared.");
+            }
+        });
+
+        populateAuditTable(ctrl.getAllLogs());
+        return page;
+    }
+
+    private void populateAuditTable(List<AuditLog> logs) {
+        auditModel.setRowCount(0);
+        for (AuditLog l : logs)
+            auditModel.addRow(new Object[]{
+                l.getId(), l.getTimestamp(), l.getCategory().toString(),
+                l.getAction(), l.getTarget(), l.getDetails()
+            });
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    //  TAB 7 — SECURITY (password change + session info)
+    // ─────────────────────────────────────────────────────────────
+
+    private JPanel buildSecurityTab() {
+        JPanel page = new JPanel(new BorderLayout(0, 24));
+        page.setBackground(BG);
+        page.setBorder(new EmptyBorder(24, 24, 24, 24));
+        page.add(pageHeader("Security Settings",
+                "Change admin password and review session policy"),
+                BorderLayout.NORTH);
+
+        // ── Password change card ──────────────────────────────────
+        JPanel pwCard = whiteCard();
+        pwCard.setLayout(new BoxLayout(pwCard, BoxLayout.Y_AXIS));
+
+        JLabel pwTitle = lbl("🔑  Change Admin Password",
+                new Font("Segoe UI", Font.BOLD, 15), TEXT_DARK);
+        pwTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pwCard.add(pwTitle);
+        pwCard.add(Box.createVerticalStrut(18));
+
+        JPanel pwForm = new JPanel(new GridLayout(0, 2, 12, 12));
+        pwForm.setBackground(WHITE);
+        pwForm.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JPasswordField fCurrent = pf();
+        JPasswordField fNew     = pf();
+        JPasswordField fConfirm = pf();
+        row(pwForm, "Current Password*",           fCurrent);
+        row(pwForm, "New Password* (min 6 chars)", fNew);
+        row(pwForm, "Confirm New Password*",       fConfirm);
+        pwCard.add(pwForm);
+        pwCard.add(Box.createVerticalStrut(14));
+
+        JLabel pwErr = errLbl();
+        pwErr.setAlignmentX(Component.LEFT_ALIGNMENT);
+        pwCard.add(pwErr);
+        pwCard.add(Box.createVerticalStrut(10));
+
+        JButton changeBtn = tealBtn("Update Password");
+        changeBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+        changeBtn.addActionListener(e -> {
+            String err = ctrl.changeAdminPassword(
+                    new String(fCurrent.getPassword()),
+                    new String(fNew.getPassword()),
+                    new String(fConfirm.getPassword()));
+            if (err != null) {
+                pwErr.setForeground(ERR_COLOR);
+                pwErr.setText(err);
+            } else {
+                pwErr.setForeground(SUCCESS);
+                pwErr.setText("✓  Password changed successfully.");
+                fCurrent.setText(""); fNew.setText(""); fConfirm.setText("");
+                Timer t = new Timer(4000, ev -> {
+                    pwErr.setText(" "); pwErr.setForeground(ERR_COLOR);
+                });
+                t.setRepeats(false); t.start();
+            }
+        });
+        pwCard.add(changeBtn);
+
+        // ── Session policy info card ──────────────────────────────
+        JPanel sessionCard = whiteCard();
+        sessionCard.setLayout(new BoxLayout(sessionCard, BoxLayout.Y_AXIS));
+
+        JLabel sTitle = lbl("⏱  Session Policy",
+                new Font("Segoe UI", Font.BOLD, 15), TEXT_DARK);
+        sTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        sessionCard.add(sTitle);
+        sessionCard.add(Box.createVerticalStrut(12));
+
+        String[] policies = {
+            "• Auto-logout triggers after 10 minutes of inactivity",
+            "• A warning dialog appears 60 seconds before expiry",
+            "• Any mouse movement or key press resets the inactivity timer",
+            "• Login, logout and password changes are all audit-logged automatically"
+        };
+        for (String policy : policies) {
+            JLabel l = lbl(policy, new Font("Segoe UI", Font.PLAIN, 13), TEXT_MUTED);
+            l.setAlignmentX(Component.LEFT_ALIGNMENT);
+            sessionCard.add(l);
+            sessionCard.add(Box.createVerticalStrut(6));
+        }
+
+        JPanel center = new JPanel();
+        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+        center.setBackground(BG);
+        center.add(pwCard);
+        center.add(Box.createVerticalStrut(20));
+        center.add(sessionCard);
+        center.add(Box.createVerticalGlue());
+
+        page.add(center, BorderLayout.CENTER);
+        return page;
     }
 
     private void refreshBillingSummary() {
