@@ -14,14 +14,17 @@ public class AuditLog implements Serializable {
     public enum Category { PATIENT, DOCTOR, APPOINTMENT, BILLING, SECURITY }
 
     private final String    id;
-    private final String    timestamp;   // human-readable, stored as string for simplicity
+    private final String    timestamp;
     private final Category  category;
-    private final String    action;      // e.g. "ADD", "UPDATE", "DELETE", "LOGIN", "PASSWORD_CHANGE"
-    private final String    target;      // e.g. "Patient P003 — Rahul Verma"
-    private final String    details;     // extra info
+    private final String    action;
+    private final String    target;
+    private final String    details;
 
     private static final DateTimeFormatter FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd  HH:mm:ss");
+
+    // ── Constructor 1 ─────────────────────────────────────────────
+    // Naya entry banate waqt use karo — timestamp apne aap set hoti hai
 
     public AuditLog(String id, Category category,
                     String action, String target, String details) {
@@ -32,6 +35,21 @@ public class AuditLog implements Serializable {
         this.target    = target;
         this.details   = details == null ? "" : details;
     }
+
+    // ── Constructor 2 ─────────────────────────────────────────────
+    // Database se load karte waqt use karo — timestamp DB se aati hai
+
+    public AuditLog(String id, Category category,
+                    String action, String target, String details, String timestamp) {
+        this.id        = id;
+        this.timestamp = timestamp == null ? LocalDateTime.now().format(FMT) : timestamp;
+        this.category  = category;
+        this.action    = action;
+        this.target    = target;
+        this.details   = details == null ? "" : details;
+    }
+
+    // ── Getters ───────────────────────────────────────────────────
 
     public String   getId()        { return id; }
     public String   getTimestamp() { return timestamp; }

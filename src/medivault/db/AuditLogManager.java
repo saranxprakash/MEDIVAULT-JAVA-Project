@@ -3,32 +3,65 @@ package medivault.db;
 import medivault.model.AuditLog;
 import medivault.model.AuditLog.Category;
 
-import java.io.*;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Singleton that writes, loads and queries AuditLog entries.
- * Logs are stored in  data/AuditLog.dat  alongside the other .dat files.
+ * Data is stored permanently in MySQL database — medivault.audit_log table.
+ *
+ * Yeh class DatabaseManager ka shared connection use karti hai,
+ * isliye alag se koi setup nahi chahiye.
  */
 public class AuditLogManager {
 
-    private static final String FILE = "data/AuditLog.dat";
     private static AuditLogManager instance;
 
-    private List<AuditLog> logs = new ArrayList<>();
-    private int nextId = 1;
-
     // ── Singleton ────────────────────────────────────────────────
+
     private AuditLogManager() {
-        new File("data").mkdirs();
-        load();
+        createTableIfNotExists();
     }
 
     public static AuditLogManager getInstance() {
-        if (instance == null) instance = new AuditLogManager();
+        if (instance == null) {
+            instance = new AuditLogManager();
+        }
         return instance;
+    }
+
+    // DatabaseManager se shared connection lena
+    private Connection getConnection() {
+        return DatabaseManager.getInstance().getConnection();
+    }
+
+    // ── Database Setup ───────────────────────────────────────────
+
+    private void createTableIfNotExists() {
+        String sql =
+            "CREATE TABLE IF NOT EXISTS audit_log ("
+            + "  id          VARCHAR(10)  PRIMARY KEY,"
+            + "  category    VARCHAR(20)  NOT NULL,"
+            + "  action      VARCHAR(50)  NOT NULL,"
+            + "  target      TEXT         NOT NULL,"
+            + "  details     TEXT,"
+            + "  timestamp   VARCHAR(30)  NOT NULL"
+            + ")";
+
+        Statement stmt = null;
+        try {
+            stmt = getConnection().createStatement();
+            stmt.execute(sql);
+        } catch (SQLException e) {
+            System.out.println("AuditLog: table creation failed — " + e.getMessage());
+        } finally {
+            closeStatement(stmt);
+        }
     }
 
     // ── Write ────────────────────────────────────────────────────
@@ -45,10 +78,32 @@ public class AuditLogManager {
                                   String action,
                                   String target,
                                   String details) {
-        String id = String.format("L%04d", nextId++);
-        AuditLog entry = new AuditLog(id, category, action, target, details);
-        logs.add(entry);
-        save();
+        String id        = generateNextId();
+        String timestamp = java.time.LocalDateTime.now().toString();
+
+        if (details == null) {
+            details = "";
+        }
+
+        String sql =
+            "INSERT INTO audit_log (id, category, action, target, details, timestamp)"
+            + " VALUES (?, ?, ?, ?, ?, ?)";
+
+        PreparedStatement pstmt = null;
+        try {
+            pstmt = getConnection().prepareStatement(sql);
+            pstmt.setString(1, id);
+            pstmt.setString(2, category.name());
+            pstmt.setString(3, action);
+            pstmt.setString(4, target);
+            pstmt.setString(5, details);
+            pstmt.setString(6, timestamp);
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            System.out.println("AuditLog: could not save log — " + e.getMessage());
+        } finally {
+            closePreparedStatement(pstmt);
+        }
     }
 
     // Convenience overload — no details
@@ -60,66 +115,175 @@ public class AuditLogManager {
 
     /** All logs, newest first. */
     public List<AuditLog> getAll() {
-        List<AuditLog> copy = new ArrayList<>(logs);
-        java.util.Collections.reverse(copy);
-        return copy;
+        String sql = "SELECT * FROM audit_log ORDER BY timestamp DESC";
+        return runQuery(sql, new String[]{});
     }
 
     /** Filter by category. */
     public List<AuditLog> getByCategory(Category category) {
-        return getAll().stream()
-                .filter(l -> l.getCategory() == category)
-                .collect(Collectors.toList());
+        String sql = "SELECT * FROM audit_log WHERE category = ? ORDER BY timestamp DESC";
+        return runQuery(sql, new String[]{ category.name() });
     }
 
     /** Simple keyword search across action + target + details. */
     public List<AuditLog> search(String keyword) {
-        String q = keyword.toLowerCase();
-        return getAll().stream()
-                .filter(l -> l.getAction().toLowerCase().contains(q)
-                        || l.getTarget().toLowerCase().contains(q)
-                        || l.getDetails().toLowerCase().contains(q))
-                .collect(Collectors.toList());
+        String like = "%" + keyword.toLowerCase() + "%";
+        String sql  =
+            "SELECT * FROM audit_log "
+            + "WHERE LOWER(action)  LIKE ? "
+            + "   OR LOWER(target)  LIKE ? "
+            + "   OR LOWER(details) LIKE ? "
+            + "ORDER BY timestamp DESC";
+        return runQuery(sql, new String[]{ like, like, like });
     }
 
     /** Most recent N entries. */
     public List<AuditLog> getRecent(int n) {
-        List<AuditLog> all = getAll();
-        return all.subList(0, Math.min(n, all.size()));
-    }
+        String sql = "SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?";
 
-    public int getTotalCount() { return logs.size(); }
+        List<AuditLog> result   = new ArrayList<AuditLog>();
+        PreparedStatement pstmt = null;
+        ResultSet rs            = null;
 
-    /** Clear all logs (admin-only action, itself logged). */
-    public void clearAll() {
-        logs.clear();
-        nextId = 1;
-        save();
-    }
-
-    // ── Persistence ──────────────────────────────────────────────
-
-    @SuppressWarnings("unchecked")
-    private void load() {
-        File f = new File(FILE);
-        if (!f.exists()) return;
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(f))) {
-            Object obj = ois.readObject();
-            if (obj instanceof List) {
-                logs   = (List<AuditLog>) obj;
-                nextId = logs.size() + 1;
+        try {
+            pstmt = getConnection().prepareStatement(sql);
+            pstmt.setInt(1, n);
+            rs = pstmt.executeQuery();
+            while (rs.next()) {
+                result.add(mapRow(rs));
             }
-        } catch (Exception e) {
-            System.out.println("AuditLog: could not load — " + e.getMessage());
+        } catch (SQLException e) {
+            System.out.println("AuditLog: could not fetch recent — " + e.getMessage());
+        } finally {
+            closeResultSet(rs);
+            closePreparedStatement(pstmt);
+        }
+
+        return result;
+    }
+
+    /** Total number of log entries in the database. */
+    public int getTotalCount() {
+        String sql    = "SELECT COUNT(*) FROM audit_log";
+        int count     = 0;
+        Statement stmt = null;
+        ResultSet rs   = null;
+
+        try {
+            stmt = getConnection().createStatement();
+            rs   = stmt.executeQuery(sql);
+            if (rs.next()) {
+                count = rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            System.out.println("AuditLog: could not count — " + e.getMessage());
+        } finally {
+            closeResultSet(rs);
+            closeStatement(stmt);
+        }
+
+        return count;
+    }
+
+    /** Clear all logs (admin-only action, khud log karo pehle). */
+    public synchronized void clearAll() {
+        String sql     = "DELETE FROM audit_log";
+        Statement stmt = null;
+
+        try {
+            stmt = getConnection().createStatement();
+            stmt.execute(sql);
+        } catch (SQLException e) {
+            System.out.println("AuditLog: could not clear — " + e.getMessage());
+        } finally {
+            closeStatement(stmt);
         }
     }
 
-    private void save() {
-        try (ObjectOutputStream oos =
-                     new ObjectOutputStream(new FileOutputStream(FILE))) {
-            oos.writeObject(logs);
-        } catch (IOException e) {
-            System.out.println("AuditLog: could not save — " + e.getMessage());
+    // ── Private Helpers ──────────────────────────────────────────
+
+    private List<AuditLog> runQuery(String sql, String[] params) {
+        List<AuditLog> result   = new ArrayList<AuditLog>();
+        PreparedStatement pstmt = null;
+        ResultSet rs            = null;
+
+        try {
+            pstmt = getConnection().prepareStatement(sql);
+            for (int i = 0; i < params.length; i++) {
+                pstmt.setString(i + 1, params[i]);
+            }
+            rs = pstmt.executeQuery();
+            while (rs.next()) {
+                result.add(mapRow(rs));
+            }
+        } catch (SQLException e) {
+            System.out.println("AuditLog: query failed — " + e.getMessage());
+        } finally {
+            closeResultSet(rs);
+            closePreparedStatement(pstmt);
+        }
+
+        return result;
+    }
+
+    /** ResultSet ki ek row ko AuditLog object mein convert karo. */
+    private AuditLog mapRow(ResultSet rs) throws SQLException {
+        String id        = rs.getString("id");
+        String catStr    = rs.getString("category");
+        String action    = rs.getString("action");
+        String target    = rs.getString("target");
+        String details   = rs.getString("details");
+        String timestamp = rs.getString("timestamp");
+
+        Category category = Category.valueOf(catStr);
+
+        return new AuditLog(id, category, action, target, details, timestamp);
+    }
+
+    /**
+     * Agle ID ke liye DB mein count check karo.
+     * Format: L0001, L0002, ...
+     */
+    private String generateNextId() {
+        String sql     = "SELECT COUNT(*) FROM audit_log";
+        int count      = 0;
+        Statement stmt = null;
+        ResultSet rs   = null;
+
+        try {
+            stmt = getConnection().createStatement();
+            rs   = stmt.executeQuery(sql);
+            if (rs.next()) {
+                count = rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            System.out.println("AuditLog: could not generate ID — " + e.getMessage());
+        } finally {
+            closeResultSet(rs);
+            closeStatement(stmt);
+        }
+
+        return String.format("L%04d", count + 1);
+    }
+
+    // ── Resource Closing ─────────────────────────────────────────
+    // Note: Connection close nahi karte — wo DatabaseManager handle karta hai
+
+    private void closeStatement(Statement stmt) {
+        if (stmt != null) {
+            try { stmt.close(); } catch (SQLException e) { /* ignore */ }
+        }
+    }
+
+    private void closePreparedStatement(PreparedStatement pstmt) {
+        if (pstmt != null) {
+            try { pstmt.close(); } catch (SQLException e) { /* ignore */ }
+        }
+    }
+
+    private void closeResultSet(ResultSet rs) {
+        if (rs != null) {
+            try { rs.close(); } catch (SQLException e) { /* ignore */ }
         }
     }
 }
